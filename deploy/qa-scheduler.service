@@ -1,0 +1,17 @@
+# Example systemd unit for an internal Linux server (not needed on PythonAnywhere).
+# Runs the scheduler loop, which triggers due jobs (each at most once per business day).
+[Unit]
+Description=QA Reminder scheduler
+After=network-online.target
+
+[Service]
+Type=simple
+User=qareminders
+WorkingDirectory=/opt/qa-reminders/backend
+EnvironmentFile=/opt/qa-reminders/backend/.env
+ExecStart=/opt/qa-reminders/venv/bin/python manage.py run_scheduler --loop --interval 60
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
