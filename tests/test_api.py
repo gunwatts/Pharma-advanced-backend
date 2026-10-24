@@ -298,5 +298,7 @@ class SetupFlowTests(ApiTestCase):
                                                            "no_pending_subject": "None", "no_pending_text": ""}, format="json")
         self.assertEqual(preview.status_code, 200, preview.data)
         self.assertEqual(preview.data["subject"], "Hi Sample Unit")
+        existing = client.post("/api/templates/preview/", {"name": "Default daily reminder", "subject": "S", "no_pending_subject": "N"}, format="json")
+        self.assertEqual(existing.status_code, 200, existing.data)  # previewing an existing template must not fail uniqueness
         bad = client.post("/api/templates/preview/", {"subject": "{{ nope }}", "no_pending_subject": "x"}, format="json")
         self.assertEqual(bad.status_code, 400)

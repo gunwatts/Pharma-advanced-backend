@@ -17,6 +17,7 @@ from apps.reminders.models import DailyRun, Delivery, EmailTemplate, JobSchedule
 from apps.reminders.serializers import (
     DailyRunSerializer,
     DeliverySerializer,
+    EmailTemplatePreviewSerializer,
     EmailTemplateSerializer,
     JobScheduleSerializer,
     ReminderRuleSerializer,
@@ -118,9 +119,9 @@ class EmailTemplateViewSet(AuditedModelViewSet):
     @action(detail=False, methods=["post"])
     def preview(self, request):
         """Render a (possibly unsaved) template with sample data or a real group's current data."""
-        serializer = EmailTemplateSerializer(data={**request.data, "name": request.data.get("name") or "preview"})
+        serializer = EmailTemplatePreviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        template = EmailTemplate(**serializer.validated_data)
+        template = EmailTemplate(**{**serializer.validated_data, "name": serializer.validated_data.get("name") or "preview"})
         group_id = request.data.get("group_id")
         try:
             if group_id:

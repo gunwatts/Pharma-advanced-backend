@@ -118,6 +118,12 @@ class EmailTemplateSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class EmailTemplatePreviewSerializer(EmailTemplateSerializer):
+    """Validates an unsaved/edited template for preview only (no uniqueness checks)."""
+
+    name = serializers.CharField(required=False, allow_blank=True, max_length=128)
+
+
 class JobScheduleSerializer(serializers.ModelSerializer):
     next_run_at = serializers.SerializerMethodField()
 

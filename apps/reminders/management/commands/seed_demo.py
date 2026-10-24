@@ -64,9 +64,9 @@ class Command(BaseCommand):
                 dict(title="Open records", widget_type="kpi", width=1),
                 dict(title="Records by category", widget_type="donut", group_by="category", width=1),
                 dict(title="Records by department", widget_type="bar", group_by="department", width=1),
-                dict(title="Due in the next 7 days", widget_type="upcoming", date_field="target_date", window_days=7, width=2, columns=["owner"]),
-                dict(title="Overdue (follow up offline)", widget_type="overdue", date_field="target_date", width=1),
-                dict(title="Target dates by month", widget_type="line", date_field="target_date", date_bucket="month", width=3),
+                dict(title="Due in the next 7 days", widget_type="upcoming", date_field="target_date", window_days=7, width=3, columns=["owner"]),
+                dict(title="Overdue (follow up offline)", widget_type="overdue", date_field="target_date", width=2),
+                dict(title="Target dates by month", widget_type="line", date_field="target_date", date_bucket="month", width=1),
             ]
             for i, w in enumerate(widgets):
                 Widget.objects.create(dashboard=dash, position=i, **w)
