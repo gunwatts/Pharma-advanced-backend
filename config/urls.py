@@ -17,6 +17,7 @@ from apps.core.views import AuditEventList, SystemSettingsView, health
 from apps.dashboards.views import AssignmentViewSet, DashboardViewSet, WidgetViewSet
 from apps.records.views import RecordViewSet
 from apps.reminders import setup_views
+from apps.reminders.job_views import job_tick
 from apps.reminders.views import (
     DailyRunViewSet,
     DeliveryViewSet,
@@ -54,6 +55,7 @@ router.register("dashboard-assignments", AssignmentViewSet, basename="dashboard-
 
 api = [
     path("health/", health, name="health"),
+    path("jobs/tick/", job_tick, name="job-tick"),
     path("auth/login/", LoginView.as_view(), name="login"),
     path("auth/logout/", LogoutView.as_view(), name="logout"),
     path("auth/me/", MeView.as_view(), name="me"),

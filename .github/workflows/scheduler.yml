@@ -1,0 +1,25 @@
+name: Reminder scheduler tick
+
+# For hosts without a built-in scheduler (e.g. PythonAnywhere free accounts).
+# Calls POST /api/jobs/tick/; the server runs each job at most once per business day,
+# at or after the time configured in Advanced Setup -> Schedules, and only when activated.
+# GitHub runs scheduled workflows from the DEFAULT branch only, and may delay them by a few minutes.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger due jobs
+        env:
+          API_URL: ${{ vars.QA_API_URL || 'https://ayudhas.pythonanywhere.com/api' }}
+          JOB_TOKEN: ${{ secrets.QA_JOB_TOKEN }}
+        run: |
+          if [ -z "$JOB_TOKEN" ]; then echo "::error::Repository secret QA_JOB_TOKEN is not set"; exit 1; fi
+          curl -fsS --max-time 280 -X POST -H "X-Job-Token: $JOB_TOKEN" "$API_URL/jobs/tick/"

@@ -213,6 +213,9 @@ SECURE_REDIRECT_EXEMPT = [r"^api/health/$"]
 
 ENABLE_DJANGO_ADMIN = env_bool("ENABLE_DJANGO_ADMIN", False)
 
+# Secret for POST /api/jobs/tick/ (external cron trigger). Empty disables the endpoint.
+JOB_TRIGGER_TOKEN = env("JOB_TRIGGER_TOKEN", "")
+
 # Frontend base URL, used for links in emails (optional).
 FRONTEND_URL = env("FRONTEND_URL", "")
 

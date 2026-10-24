@@ -7,7 +7,8 @@ stale-lock takeover after the TTL), and the delivery ledger makes reruns safe.
 
 | Environment | How to schedule |
 |---|---|
-| PythonAnywhere | A daily *Scheduled task* runs `manage.py run_daily_reminders` (times are UTC) |
+| PythonAnywhere (free) | GitHub Actions cron calls `POST /api/jobs/tick/` with `X-Job-Token` (see `.github/workflows/scheduler.yml`) |
+| PythonAnywhere (paid) | A daily *Scheduled task* runs `manage.py run_daily_reminders` (times are UTC) |
 | Linux server, cron | `*/10 * * * * cd /opt/qa/backend && ../venv/bin/python manage.py run_scheduler` |
 | Linux server, systemd | [`deploy/qa-scheduler.service`](../deploy/qa-scheduler.service) runs `run_scheduler --loop` |
 | Windows server | Task Scheduler every 10 minutes runs `python manage.py run_scheduler` |

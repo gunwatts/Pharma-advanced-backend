@@ -62,14 +62,20 @@ Login uses expiring bearer tokens, not cookies, so the cross-site setup works wi
    - Turn on **Force HTTPS**, then click **Reload**.
    - Check `https://<pa-user>.pythonanywhere.com/api/health/`. It should return `{"status": "ok", ...}`.
 
-4. Add a scheduled task on the **Tasks** tab. **Times are UTC.** For example, 08:00 Asia/Kolkata is 02:30 UTC:
-
-   ```
-   cd /home/<pa-user>/Pharma-advanced-backend && /home/<pa-user>/.virtualenvs/qa-env/bin/python manage.py backup_db --keep 14 && /home/<pa-user>/.virtualenvs/qa-env/bin/python manage.py run_daily_reminders
-   ```
-
-   The command respects the run days in **Advanced Setup → Schedules** and does nothing until reminders are activated.
-   Re-running it on the same day is safe: groups already sent are skipped.
+4. **Daily trigger.** PythonAnywhere **free accounts no longer have scheduled tasks**, so use one of these:
+   - **Free (recommended): GitHub Actions trigger.** Generate a token
+     (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) and set it as `JOB_TRIGGER_TOKEN` in the server
+     `.env`, then reload the web app. In the backend repo, add the Actions secret `QA_JOB_TOKEN` with the same value,
+     and optionally the variable `QA_API_URL=https://<pa-user>.pythonanywhere.com/api`.
+     [`.github/workflows/scheduler.yml`](../.github/workflows/scheduler.yml) calls `POST /api/jobs/tick/` every 30 minutes.
+     The server starts each job only when it is due (the time and run days in **Advanced Setup → Schedules**, business
+     timezone), at most once per day, and only after activation. GitHub runs scheduled workflows **only from the default
+     branch**, sometimes a few minutes late.
+   - **Paid account:** add a daily *Scheduled task* instead (times are UTC; 08:00 Asia/Kolkata is 02:30 UTC):
+     ```
+     cd /home/<pa-user>/Pharma-advanced-backend && /home/<pa-user>/.virtualenvs/qa-env/bin/python manage.py backup_db --keep 14 && /home/<pa-user>/.virtualenvs/qa-env/bin/python manage.py run_daily_reminders
+     ```
+   Either way, re-running on the same day is safe: groups already sent are skipped.
 
 5. To update after new commits:
    `git pull && pip install -r requirements.txt && python manage.py migrate && python manage.py collectstatic --noinput`,
