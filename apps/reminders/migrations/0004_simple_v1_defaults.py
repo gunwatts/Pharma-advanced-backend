@@ -12,7 +12,8 @@ EVENT_COLUMNS = {"id": "QMS Number", "department": "Department", "description": 
 ACTION_COLUMNS = {"id": "Action ID", "qms_number": "QMS Number", "department": "Department", "description": "Description",
                   "target_date": "Target Date", "status": "Status"}
 EVENT_SHEETS = {"change_control": "Change Control", "deviation": "Deviation", "incident": "Incident", "capa": "CAPA", "oos": "OOS", "oot": "OOT"}
-STATUSES = [("Open", False), ("In Progress", False), ("Pending Approval", False), ("Completed", True), ("Closed", True), ("Cancelled", True)]
+# Only "Open" is reminded by default; finished statuses stop reminders. Any other status is flagged so the admin can classify it.
+STATUSES = [("Open", False), ("Completed", True), ("Closed", True), ("Cancelled", True)]
 OLD_DEFAULT_SUBJECT = "QA reminders for {{ unit_name }} / {{ department_name }} - {{ run_date }} ({{ total_count }} item(s))"
 
 
@@ -49,6 +50,7 @@ def forwards(apps, schema_editor):
     Category.objects.filter(key__in=["audit", "audit_observation", "audit_action_item"], mappings__isnull=True).update(active=False)
 
     for cat in Category.objects.filter(key__in=list(EVENT_SHEETS) + ["action_plan"]):
+        StatusDefinition.objects.filter(category=cat, value__in=["In Progress", "Pending Approval"]).delete()
         for value, closed in STATUSES:
             StatusDefinition.objects.get_or_create(category=cat, value=value, defaults={"label": value, "is_closed": closed})
         if not ReminderRule.objects.filter(category=cat).exists():

@@ -141,6 +141,13 @@ BUSINESS_TIMEZONE = env("BUSINESS_TIMEZONE", "Asia/Kolkata")
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Same-server deployment (e.g. Windows server): Django also serves the built frontend from this
+# folder at "/", so the app and the API share one address and no CORS is needed.
+FRONTEND_DIST = Path(env("FRONTEND_DIST") or str(BASE_DIR / "frontend_dist"))
+if (FRONTEND_DIST / "index.html").exists():
+    WHITENOISE_ROOT = str(FRONTEND_DIST)
+    WHITENOISE_INDEX_FILE = True
+
 # Uploaded source workbooks live outside any web-served directory.
 PRIVATE_UPLOAD_ROOT = Path(env("PRIVATE_UPLOAD_ROOT", str(BASE_DIR / "data" / "uploads")))
 BACKUP_ROOT = Path(env("BACKUP_ROOT", str(BASE_DIR / "data" / "backups")))

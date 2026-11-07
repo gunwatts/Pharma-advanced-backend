@@ -28,3 +28,4 @@ media/
 .vscode/
 .idea/
 .DS_Store
+frontend_dist/

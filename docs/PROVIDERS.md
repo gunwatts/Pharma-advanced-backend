@@ -13,28 +13,53 @@ Delivery results are reported precisely:
 
 The application never creates drafts, and it never reports a draft or a log-only message as delivered.
 
-## Microsoft 365: Microsoft Graph `sendMail` (recommended for M365 tenants)
+## Microsoft 365 (recommended): plant Excel files + shared mailbox
 
-This does not depend on SMTP AUTH, which many tenants disable.
+A **single Entra app registration** is used both to read the plant workbooks in OneDrive/SharePoint and to send
+from the shared mailbox. In **Setup → Microsoft 365** the admin picks one of two modes. IT prepares the matching
+permissions.
 
-1. **Entra ID → App registrations → New registration** (single tenant). Record the *tenant ID* and *client ID*.
-2. **Certificates & secrets → New client secret**. Record the value and its expiry date, and plan to rotate it.
-3. **API permissions → Microsoft Graph → Application permissions → `Mail.Send`**, then **Grant admin consent**.
-   - Optional: `User.Read.All` lets *Test connection* confirm the mailbox exists. It is not needed to send.
-4. **Restrict the app to the sender mailbox** (strongly recommended). Use an Exchange Online
-   [application access policy or RBAC for Applications](https://learn.microsoft.com/graph/auth-limit-mailbox-access)
-   so the app can send only as the reminder mailbox.
-5. Set these on the server:
+### Common steps (IT)
+1. In **Microsoft Entra admin center → App registrations → New registration**, name it "QMS Reminder System" and
+   choose *Single tenant*. Note the **Directory (tenant) ID** and **Application (client) ID**.
+2. Under **Certificates & secrets → New client secret**, copy the value and note the expiry date.
+3. Put these on the server, in `.env`:
    ```
-   SENDER_MAIN_GRAPH_TENANT_ID=...
-   SENDER_MAIN_GRAPH_CLIENT_ID=...
-   SENDER_MAIN_GRAPH_CLIENT_SECRET=...
+   GRAPH_TENANT_ID=...
+   GRAPH_CLIENT_ID=...
+   GRAPH_CLIENT_SECRET=...
    ```
-6. In Quick Start, create a sender with provider *Microsoft 365*, set *From* to the shared or reminder mailbox and
-   the prefix to `SENDER_MAIN`, then run **Test connection** and **Send test email**.
+4. Create or choose the **shared mailbox**, for example `qms.reminders@company.com`.
 
-Graph returns `202 Accepted` with no message ID. The ledger stores the Graph `request-id` and adds an
-`X-QA-Idempotency-Key` header to each message so it can be found during reconciliation.
+### Option A: "IT-registered app" (app-only, most robust)
+- Under **API permissions → Microsoft Graph → Application permissions**, add:
+  - `Files.Read.All`, to read the plant workbooks. You can use `Sites.Selected` instead and grant read on the
+    specific SharePoint site(s), but pasting OneDrive *personal* sharing links then needs `Files.Read.All`.
+  - `Mail.Send`.
+- Click **Grant admin consent**.
+- **Restrict sending to the shared mailbox only** (strongly recommended). Use an Exchange Online application
+  access policy or *RBAC for Applications*, scoped to `qms.reminders@company.com`. Without this, the app could send
+  as any mailbox.
+- Nothing expires when people change passwords or leave. Only the client secret has an expiry date.
+
+### Option B: "Admin signs in with Microsoft" (delegated)
+- Under **Authentication → Add a platform → Web**, set the redirect URI to
+  `https://<server>/api/m365/callback/`. This is also shown in Setup and must match `M365_REDIRECT_URI` in `.env`.
+- Under **API permissions → Microsoft Graph → Delegated permissions**, add: `User.Read`, `Files.Read.All`,
+  `Mail.Send`, `Mail.Send.Shared`, `offline_access`, `openid`, `profile`, `email`. Click **Grant admin consent** if
+  your tenant requires it.
+- In the **Exchange admin center**, give the admin's account **Send As** permission on the shared mailbox.
+- The admin clicks **Sign in with Microsoft** in Setup. The app can then read every workbook that account can open.
+  Only an encrypted refresh token is stored on the server. If the account's password changes, or the sign-in is
+  revoked or expires, the daily summary reports it and the admin signs in again.
+
+### Linking each plant's workbook
+In Setup → Plants & departments → *Excel file*, open the workbook in OneDrive/SharePoint, choose **Share → Copy
+link** (or copy the address bar), paste it and click **Use link**. The app resolves the link to the file once, then
+reads that file every day. Plants keep editing the same file.
+
+Delivery results: Graph returns `202 Accepted` (no message ID). The ledger stores the Graph `request-id`, and each
+message carries an `X-QA-Idempotency-Key` header so it can be found in the Sent items.
 
 ## Google: Gmail API
 
