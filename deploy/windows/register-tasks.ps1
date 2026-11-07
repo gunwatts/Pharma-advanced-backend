@@ -4,15 +4,21 @@
     QMS Reminders - Scheduler  : every 15 minutes, sends the daily mails when due (once per day)
     QMS Reminders - Backup     : daily database backup at 07:30 (before the 08:00 mails)
   The tasks run as the service account given below, which must be able to read this folder.
+  Use -ServiceUser SYSTEM (no password) only if IT prefers the built-in system account.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$ServiceUser,
-    [Parameter(Mandatory = $true)][string]$ServicePassword
+    [string]$ServicePassword
 )
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path "$PSScriptRoot\..\..").Path
 $Ps = "powershell.exe"
-$Common = @{ User = $ServiceUser; Password = $ServicePassword; RunLevel = "Limited"; Force = $true }
+if ($ServiceUser -in @("SYSTEM", "NT AUTHORITY\SYSTEM")) {
+    $Common = @{ User = "NT AUTHORITY\SYSTEM"; RunLevel = "Highest"; Force = $true }
+} else {
+    if (-not $ServicePassword) { throw "Give -ServicePassword for $ServiceUser (or use -ServiceUser SYSTEM)." }
+    $Common = @{ User = $ServiceUser; Password = $ServicePassword; RunLevel = "Limited"; Force = $true }
+}
 
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
     -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)

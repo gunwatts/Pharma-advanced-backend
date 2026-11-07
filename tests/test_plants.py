@@ -77,3 +77,17 @@ class PlantWorkbookTests(QATestCase):
         self.assertEqual(summary.recipients_to, ["cqa.head@example.com"])
         self.assertIn("all OK", summary.subject)
         self.assertEqual(send.call_count, 5)  # 4 department mails + 1 summary
+
+    def test_unknown_status_is_flagged_and_reported_not_silently_skipped(self):
+        SystemSettings.objects.filter(pk=1).update(alert_recipients=["cqa.head@example.com"])
+        self.sync_plant(self.u1, {"Change Control": [EVENT_HEADERS, ["CC-9", "QA", "Typo status", d(2), "Opne"]],
+                                  "CAPA": [EVENT_HEADERS], "Action Plans": [ACTION_HEADERS]})
+        self.sync_plant(self.u2, {"Change Control": [EVENT_HEADERS], "CAPA": [EVENT_HEADERS], "Action Plans": [ACTION_HEADERS]})
+        plan = workflow.build_plan(sync=True)
+        qa = next(g for g in plan.groups if g.group.unit == self.u1 and g.group.department == self.qa)
+        self.assertEqual([e.reason for e in qa.flagged], ["data_issue"])
+        self.assertEqual(qa.action, "held")  # no misleading "nothing pending"
+        with mock.patch.object(providers.ConsoleProvider, "_send", return_value=providers.SendResult(providers.ACCEPTED, "m")):
+            workflow.run_daily(kind=DailyRun.KIND_MANUAL, triggered_by="t")
+        summary = Delivery.objects.get(kind="alert")
+        self.assertIn("attention needed", summary.subject)

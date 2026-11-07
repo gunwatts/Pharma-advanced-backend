@@ -78,6 +78,12 @@ Microsoft 365 (Graph): reads each plant's Excel in OneDrive/SharePoint, sends fr
    machines in Windows Firewall.
 8. Check `https://qms-reminders.company.local/api/health/`. It should return `{"status": "ok", ...}`. Then open
    `https://qms-reminders.company.local/` and sign in.
+9. Run the **smoke test**. It must end with `SMOKE TEST PASSED`:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File deploy\windows\smoke-test.ps1 -BaseUrl https://qms-reminders.company.local
+   ```
+   After Microsoft 365 is set up (step 3 below), run it again with `-Online`. Then work through the protocol in
+   [DEPLOYMENT_TEST_CASES.md](DEPLOYMENT_TEST_CASES.md) and keep the completed copy as deployment evidence.
 
 ## 3. First-time setup in the app (admin)
 

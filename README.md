@@ -24,6 +24,8 @@ company. The corporate QA head sets it up once. After that, every send day, each
 ## Documentation
 - [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md): how the admin sets up and uses the system.
 - [docs/DEPLOYMENT_WINDOWS.md](docs/DEPLOYMENT_WINDOWS.md): **production install on the company Windows server**.
+- [docs/DEPLOYMENT_TEST_CASES.md](docs/DEPLOYMENT_TEST_CASES.md): **deployment test protocol** (IQ/OQ/PQ style). Use it
+  with `deploy\windows\smoke-test.ps1`, `manage.py deploy_check` and `manage.py make_test_workbook`.
 - [docs/PROVIDERS.md](docs/PROVIDERS.md): Microsoft 365 app registration (both modes), Gmail and SMTP.
 - [docs/OPERATIONS.md](docs/OPERATIONS.md): scheduler, SQLite, backup/restore and logging.
 - [docs/SECURITY.md](docs/SECURITY.md): security model and the regulatory note.
@@ -47,6 +49,8 @@ python manage.py runserver
 | Send today's mails now | `python manage.py run_daily_reminders` |
 | Read all Excel files only | `python manage.py sync_sources` |
 | Backup / verify | `python manage.py backup_db --keep 30` / `python manage.py verify_backup <file>` |
+| Verify an installation | `python manage.py deploy_check [--online]` (Windows: `deploy\windows\smoke-test.ps1`) |
+| Functional test workbook | `python manage.py make_test_workbook --plant TEST --out TEST.xlsx` |
 
 V2 features (dashboards, record explorer, advanced configuration) remain in the code and API, but V1's interface
 shows only the reminder-mail screens.

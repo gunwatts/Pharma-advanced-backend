@@ -370,6 +370,10 @@ def send_admin_alert(daily_run, plan, summary):
         if row["outcome"] not in ("sent", "skipped_sent"):
             problems.append(f"{row['unit']} / {row['department']}: {OUTCOME_LABELS.get(row['outcome'], row['outcome'])} "
                             f"{row['detail'] or ''} {' | '.join(row['hold_reasons'])}".strip())
+    flagged = [row for row in summary.get("groups", []) if row.get("flagged")]
+    for row in flagged:
+        problems.append(f"{row['unit']} / {row['department']}: {row['flagged']} item(s) not mailed because of data problems "
+                        "(unknown status, missing or invalid target date) - correct the Excel.")
     if summary.get("unrouted"):
         problems.append(f"{summary['unrouted']} item(s) belong to a plant/department with no recipients configured.")
     problems += [f"Note: {w}" for w in summary.get("warnings", [])]

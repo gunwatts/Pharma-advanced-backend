@@ -91,6 +91,11 @@ def evaluate_rule(record, rule, today, catch_up_days=1, tz=None):
         return Evaluation(record, False, "out_of_rule_scope", rule)
     if rule._dept_ids and record.department_id not in rule._dept_ids:
         return Evaluation(record, False, "out_of_rule_scope", rule)
+    issues = record.issues or []
+    unknown = [i for i in issues if i.get("code") == "unknown_status"]
+    if unknown:  # a status nobody classified (typo, new value) must be reviewed, never silently skipped
+        return Evaluation(record, False, "data_issue", rule, parse_iso((record.data or {}).get(rule.target_date_field)),
+                          detail=unknown[0].get("message", "")[:300])
     status = normalize_label(record.status)
     if rule.exclude_statuses and status in {normalize_label(s) for s in rule.exclude_statuses}:
         return Evaluation(record, False, "status_excluded", rule, detail=record.status)
@@ -101,7 +106,6 @@ def evaluate_rule(record, rule, today, catch_up_days=1, tz=None):
             return Evaluation(record, False, "condition_excluded", rule,
                               detail=f"{cond.get('field')} {OPERATORS.get(cond.get('op'), cond.get('op'))} {cond.get('value', '')}".strip())
 
-    issues = record.issues or []
     if any(i.get("field") == rule.target_date_field and i.get("code") == "invalid_date" for i in issues):
         return Evaluation(record, False, "invalid_date", rule)
     blocking = [i for i in issues if i.get("code") in ("missing_required", "unknown_status") and i.get("field") != rule.target_date_field]

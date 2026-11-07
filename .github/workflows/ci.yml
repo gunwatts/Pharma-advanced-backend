@@ -27,3 +27,67 @@ jobs:
         env:
           DJANGO_DEBUG: "true"
       - run: python manage.py test tests
+
+  # Deployment test on a real Windows machine: runs the documented install, registers the scheduled
+  # tasks, starts the web server through Task Scheduler, runs the smoke test and one demo day of mails.
+  windows-deploy:
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate PowerShell scripts parse
+        run: |
+          $bad = 0
+          Get-ChildItem deploy\windows\*.ps1 | ForEach-Object {
+            $errs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs) | Out-Null
+            if ($errs) { $bad++; Write-Host "$($_.Name): $($errs | Out-String)" }
+          }
+          if ($bad) { exit 1 }
+      - name: INS-02 Install (deploy\windows\install.ps1)
+        run: powershell -ExecutionPolicy Bypass -File deploy\windows\install.ps1
+      - name: INS-03 Configure .env for this machine
+        run: |
+          (Get-Content .env) -replace '^DJANGO_ALLOWED_HOSTS=.*', 'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1' `
+            -replace '^SECURE_SSL_REDIRECT=.*', 'SECURE_SSL_REDIRECT=false' `
+            -replace '^CORS_ALLOWED_ORIGINS=.*', 'CORS_ALLOWED_ORIGINS=' | Set-Content .env -Encoding UTF8
+          New-Item -ItemType Directory -Force frontend_dist | Out-Null
+          Set-Content frontend_dist\index.html '<!doctype html><html><body><div id="root"></div></body></html>'
+      - name: INS-04 Create administrator
+        run: |
+          $env:ADMIN_USERNAME = "cqa.admin"; $env:ADMIN_PASSWORD = "Ci-Only-Passphrase-2026!"
+          .venv\Scripts\python.exe manage.py bootstrap_admin
+      - name: INS-05 Register scheduled tasks and start the web server
+        run: |
+          powershell -ExecutionPolicy Bypass -File deploy\windows\register-tasks.ps1 -ServiceUser SYSTEM
+          $ok = $false
+          foreach ($i in 1..60) {
+            try { if ((Invoke-RestMethod http://localhost:8000/api/health/ -TimeoutSec 5).status -eq "ok") { $ok = $true; break } } catch {}
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ok) { Get-Content logs\web.log -ErrorAction SilentlyContinue; exit 1 }
+      - name: INS-06..12 Smoke test
+        run: powershell -ExecutionPolicy Bypass -File deploy\windows\smoke-test.ps1
+      - name: OPS-01 One demo day of reminder mails (log-only sender)
+        run: |
+          $py = ".venv\Scripts\python.exe"
+          & $py manage.py seed_demo
+          & $py manage.py shell -c "from apps.core.models import SystemSettings; SystemSettings.objects.filter(pk=1).update(reminders_active=True)"
+          & $py manage.py run_daily_reminders --ignore-schedule
+          & $py manage.py shell -c "from apps.reminders.models import Delivery as D; n = D.objects.filter(state='sent', kind__in=['reminder','no_pending']).count(); print('department mails sent:', n); assert n == 10, n"
+          & $py manage.py run_daily_reminders --ignore-schedule
+          & $py manage.py shell -c "from apps.reminders.models import Delivery as D; n = D.objects.filter(kind__in=['reminder','no_pending']).count(); assert n == 10, 'resent!'; print('second run sent nothing new: OK')"
+      - name: OPS-05 Backup and verify
+        run: |
+          .venv\Scripts\python.exe manage.py backup_db --keep 3
+          $f = Get-ChildItem data\backups\qa-reminders-*.gz | Select-Object -First 1
+          .venv\Scripts\python.exe manage.py verify_backup $f.FullName
+      - name: Logs
+        if: always()
+        run: Get-Content logs\*.log -Tail 40 -ErrorAction SilentlyContinue
