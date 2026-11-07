@@ -5,7 +5,7 @@ from apps.catalog.models import FieldDefinition
 from apps.sources import connectors
 from apps.sources.models import DataSource, SourceMapping, SyncRun
 
-GRAPH_KEYS = {"drive_id", "site_id", "user", "item_id", "item_path", "display_path"}
+GRAPH_KEYS = {"drive_id", "site_id", "user", "item_id", "item_path", "display_path", "web_url"}
 
 
 class DataSourceSerializer(serializers.ModelSerializer):

@@ -39,8 +39,17 @@ class SenderProfile(models.Model):
 class ReminderRule(models.Model):
     name = models.CharField(max_length=128)
     category = models.ForeignKey("catalog.Category", on_delete=models.PROTECT, related_name="reminder_rules")
+    ANCHOR_DUE = "due_date"
+    ANCHOR_FIRST_SEEN = "first_seen"
+    ANCHOR_CHOICES = [(ANCHOR_DUE, "Counted back from the target date"), (ANCHOR_FIRST_SEEN, "Counted from when the item first appeared")]
+
     target_date_field = models.CharField(max_length=63)
-    window_days = models.PositiveSmallIntegerField(default=7)
+    window_days = models.PositiveSmallIntegerField(default=7, help_text="'Action required' daily when due within this many days.")
+    repeat_every_days = models.PositiveSmallIntegerField(
+        null=True, blank=True, help_text="'Periodic reminder' every N days before the daily window. Empty = no periodic reminders.")
+    repeat_anchor = models.CharField(max_length=16, choices=ANCHOR_CHOICES, default=ANCHOR_DUE)
+    start_days_before = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Ignore items due further away than this. Empty = no limit.")
     include_statuses = models.JSONField(default=list, blank=True, help_text="Empty = every open status.")
     exclude_statuses = models.JSONField(default=list, blank=True)
     conditions = models.JSONField(default=list, blank=True, help_text="Exclusion conditions: [{field, op, value}].")

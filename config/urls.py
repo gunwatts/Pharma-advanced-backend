@@ -13,6 +13,7 @@ from apps.catalog.views import (
     StatusDefinitionViewSet,
     UnitViewSet,
 )
+from apps.core import m365_views
 from apps.core.views import AuditEventList, SystemSettingsView, health
 from apps.dashboards.views import AssignmentViewSet, DashboardViewSet, WidgetViewSet
 from apps.records.views import RecordViewSet
@@ -56,6 +57,12 @@ router.register("dashboard-assignments", AssignmentViewSet, basename="dashboard-
 api = [
     path("health/", health, name="health"),
     path("jobs/tick/", job_tick, name="job-tick"),
+    path("m365/status/", m365_views.m365_status, name="m365-status"),
+    path("m365/mode/", m365_views.m365_mode, name="m365-mode"),
+    path("m365/login/", m365_views.m365_login, name="m365-login"),
+    path("m365/callback/", m365_views.m365_callback, name="m365-callback"),
+    path("m365/disconnect/", m365_views.m365_disconnect, name="m365-disconnect"),
+    path("m365/test/", m365_views.m365_test, name="m365-test"),
     path("auth/login/", LoginView.as_view(), name="login"),
     path("auth/logout/", LogoutView.as_view(), name="logout"),
     path("auth/me/", MeView.as_view(), name="me"),
@@ -69,6 +76,7 @@ api = [
     path("source-options/", source_options, name="source-options"),
     path("browse/server/", browse_server, name="browse-server"),
     path("browse/graph/", browse_graph, name="browse-graph"),
+    path("simple/", include("apps.simple.urls")),
     path("", include(router.urls)),
 ]
 

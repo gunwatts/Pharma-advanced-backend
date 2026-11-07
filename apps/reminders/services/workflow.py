@@ -18,11 +18,11 @@ from django.utils.html import escape
 from apps.catalog.models import Category, RecipientGroup, Relationship
 from apps.core import locks
 from apps.core.models import SystemSettings
-from apps.core.timeutils import business_today
+from apps.core.timeutils import business_today, business_tz
 from apps.records.models import Record
-from apps.reminders.models import DailyRun, Delivery, EmailTemplate, ReminderRule, SenderProfile
+from apps.reminders.models import DailyRun, Delivery, EmailTemplate, JobSchedule, ReminderRule, SenderProfile
 from apps.reminders.services import compose, delivery, providers
-from apps.reminders.services.eligibility import REASON_LABELS
+from apps.reminders.services.eligibility import REASON_LABELS, SECTION_ACTION, SECTION_PERIODIC
 from apps.reminders.services.rules import Evaluation, RuleSet, evaluate_record
 from apps.sources.models import SourceMapping, SyncRun
 from apps.sources.sync import sync_all
@@ -79,6 +79,18 @@ def _active_rules():
     return list(ReminderRule.objects.filter(active=True, category__active=True).select_related("category").prefetch_related("units", "departments"))
 
 
+def catch_up_days(run_date):
+    """Days this run covers: 2 on a Monday when Sunday is not a send day, so periodic cycle days are not lost."""
+    schedule = JobSchedule.objects.filter(job=JobSchedule.JOB_DAILY).first()
+    days = set(schedule.days_of_week or []) if schedule else set()
+    if not days:
+        return 1
+    span = 1
+    while span < 7 and (run_date - timedelta(days=span)).weekday() not in days:
+        span += 1
+    return span
+
+
 def _relevant_categories(ruleset):
     ids = set(ruleset.category_ids)
     for rel in Relationship.objects.filter(active=True, child_category_id__in=list(ids)):
@@ -130,6 +142,7 @@ def build_plan(run_date=None, sync=True, daily_run=None, triggered_by="", templa
     untrusted = _trust(relevant, ruleset.category_ids, sync_results, sync, warnings)
     untrusted_reasons = [reason for entries in untrusted.values() for _, reason in entries]
 
+    span, tz = catch_up_days(run_date), business_tz()
     records = Record.objects.filter(category_id__in=ruleset.category_ids).select_related(
         "category", "unit", "department", "parent", "parent__category")
     groups = list(RecipientGroup.objects.filter(active=True, unit__active=True, department__active=True).select_related(
@@ -138,7 +151,7 @@ def build_plan(run_date=None, sync=True, daily_run=None, triggered_by="", templa
     unrouted = []
 
     for record in records:
-        ev = evaluate_record(record, ruleset, run_date)
+        ev = evaluate_record(record, ruleset, run_date, span, tz)
         plan = plans.get((record.unit_id, record.department_id))
         if plan is None:
             if ev.eligible or ev.reason in ("data_issue", "invalid_date", "missing_date"):
@@ -188,6 +201,7 @@ def _ev_summary(ev):
         "department": ev.record.department.name,
         "target_date": ev.target_date.isoformat() if ev.target_date else None,
         "reason": ev.reason,
+        "section": ev.section,
         "reason_label": REASON_LABELS.get(ev.reason, ev.reason),
         "detail": ev.detail,
         "rule": ev.rule.name if ev.rule else None,
@@ -279,9 +293,9 @@ def run_daily(kind=DailyRun.KIND_SCHEDULED, triggered_by="scheduler", sync=True,
             if gp.action == "held":
                 gp.outcome = delivery.mark_held(entry, " | ".join(gp.hold_reasons), daily_run)
             else:
-                counts = {"total": len(gp.items)}
+                counts = {"total": len(gp.items), SECTION_ACTION: 0, SECTION_PERIODIC: 0}
                 for ev in gp.items:
-                    counts[ev.record.category.kind] = counts.get(ev.record.category.kind, 0) + 1
+                    counts[ev.section] = counts.get(ev.section, 0) + 1
                 profile = gp.group.sender_profile if gp.group.sender_profile and gp.group.sender_profile.active else default_profile
                 email_kind = Delivery.KIND_REMINDER if gp.action == "reminder" else Delivery.KIND_NO_PENDING
                 gp.outcome = delivery.deliver(entry, gp.email, profile, email_kind, counts, settings_obj.max_send_attempts,
@@ -292,8 +306,7 @@ def run_daily(kind=DailyRun.KIND_SCHEDULED, triggered_by="scheduler", sync=True,
         problems = summary["failed"] or summary["uncertain"] or summary["held"] or plan.untrusted_reasons or plan.unrouted
         status = DailyRun.STATUS_ATTENTION if problems else DailyRun.STATUS_COMPLETED
         _finish(daily_run, status, summary)
-        if problems:
-            send_admin_alert(daily_run, plan, summary)
+        send_admin_alert(daily_run, plan, summary)  # daily summary for the corporate QA head (always)
         return daily_run
     except WorkflowError as exc:
         _finish(daily_run, DailyRun.STATUS_FAILED, {"error": str(exc)})
@@ -317,6 +330,8 @@ def _summarize(plan, outcomes):
         counters[bucket] = counters.get(bucket, 0) + 1
         rows.append({"group_id": gp.group.pk, "unit": gp.group.unit.name, "department": gp.group.department.name,
                      "planned": gp.action, "outcome": action, "items": len(gp.items), "flagged": len(gp.flagged),
+                     "action_required": sum(1 for ev in gp.items if ev.section == SECTION_ACTION),
+                     "periodic": sum(1 for ev in gp.items if ev.section == SECTION_PERIODIC),
                      "detail": (gp.outcome.detail if gp.outcome else "")[:300], "hold_reasons": gp.hold_reasons})
     return {**counters, "groups": rows, "sync": _sync_summary(plan.sync_results), "untrusted": plan.untrusted_reasons,
             "unrouted": len(plan.unrouted), "unrouted_items": [_ev_summary(ev) for ev in plan.unrouted[:50]], "warnings": plan.warnings}
@@ -331,36 +346,60 @@ def _finish(daily_run, status, summary):
     return daily_run
 
 
+SUMMARY_TH = 'style="background:#0f4c75;color:#fff;text-align:left;padding:5px 8px;border:1px solid #d0d7de"'
+SUMMARY_TD = 'style="padding:5px 8px;border:1px solid #d0d7de"'
+OUTCOME_LABELS = {"sent": "Sent", "skipped_sent": "Already sent today", "held": "HELD - not sent", "failed": "FAILED",
+                  "uncertain": "UNCERTAIN - check mailbox", "skipped_uncertain": "Uncertain earlier - check", "skipped_max_attempts": "FAILED (max attempts)"}
+
+
 def send_admin_alert(daily_run, plan, summary):
-    """Best-effort operational alert to configured admin recipients."""
+    """Daily summary to the corporate QA head (alert recipients): per plant/department results plus any problems."""
     settings_obj = SystemSettings.load()
     recipients = settings_obj.alert_recipients or []
     if not recipients:
-        logger.warning("Run needs attention but no alert recipients are configured", extra={"daily_run_id": daily_run.pk})
+        logger.warning("No summary/alert recipients are configured", extra={"daily_run_id": daily_run.pk})
         return None
     profile = settings_obj.alert_sender_profile or SenderProfile.objects.filter(is_default=True, active=True).first()
     if profile is None:
         return None
-    lines = [f"Daily reminder run #{daily_run.pk} for {daily_run.run_date:%d-%b-%Y} finished with status: {daily_run.get_status_display()}."]
+    problems = []
     if summary.get("error"):
-        lines.append(f"Error: {summary['error']}")
-    for reason in summary.get("untrusted", []):
-        lines.append(f"Source problem: {reason}")
+        problems.append(f"Error: {summary['error']}")
+    problems += [f"Excel/source problem: {reason}" for reason in summary.get("untrusted", [])]
     for row in summary.get("groups", []):
         if row["outcome"] not in ("sent", "skipped_sent"):
-            lines.append(f"{row['unit']} / {row['department']}: {row['outcome']} {row['detail'] or ''} {' | '.join(row['hold_reasons'])}".strip())
+            problems.append(f"{row['unit']} / {row['department']}: {OUTCOME_LABELS.get(row['outcome'], row['outcome'])} "
+                            f"{row['detail'] or ''} {' | '.join(row['hold_reasons'])}".strip())
     if summary.get("unrouted"):
-        lines.append(f"{summary['unrouted']} record(s) belong to a unit/department with no active recipients.")
-    text = "\n".join(lines)
-    html = "<p>" + "</p><p>".join(escape(line) for line in lines) + "</p>"
-    email = compose.EmailContent(subject=f"[QA Reminders] Attention needed - run {daily_run.run_date:%d-%b-%Y}",
-                                 html=html, text=text, to=recipients, cc=[])
+        problems.append(f"{summary['unrouted']} item(s) belong to a plant/department with no recipients configured.")
+    problems += [f"Note: {w}" for w in summary.get("warnings", [])]
+
+    status_word = "attention needed" if problems else "all OK"
+    lines = [f"Daily QMS reminder run for {daily_run.run_date:%d-%b-%Y}: {status_word}."]
+    html = [f"<p>{escape(lines[0])}</p>"]
+    if problems:
+        html.append('<h3 style="color:#a32020">Needs attention</h3><ul>' + "".join(f"<li>{escape(p)}</li>" for p in problems) + "</ul>")
+        lines += ["", "Needs attention:"] + [f"- {p}" for p in problems]
+    groups = summary.get("groups", [])
+    if groups:
+        head = "".join(f"<th {SUMMARY_TH}>{h}</th>" for h in ("Plant", "Department", "Mail", "Action required", "Periodic", "Result"))
+        body = ""
+        for row in groups:
+            mail = {"reminder": "Reminder", "no_pending": "Nothing pending", "held": "Held"}.get(row["planned"], row["planned"])
+            cells = [row["unit"], row["department"], mail, row.get("action_required", 0), row.get("periodic", 0),
+                     OUTCOME_LABELS.get(row["outcome"], row["outcome"])]
+            body += "<tr>" + "".join(f"<td {SUMMARY_TD}>{escape(str(c))}</td>" for c in cells) + "</tr>"
+            lines.append(f"{row['unit']} / {row['department']}: {mail}, {row.get('action_required', 0)} action required, "
+                         f"{row.get('periodic', 0)} periodic - {OUTCOME_LABELS.get(row['outcome'], row['outcome'])}")
+        html.append(f'<table style="border-collapse:collapse;font-size:13px"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>')
+    email = compose.EmailContent(subject=f"[QMS Reminders] Daily summary {daily_run.run_date:%d-%b-%Y} - {status_word}",
+                                 html=compose._wrap("Daily summary", "".join(html)), text="\n".join(lines), to=recipients, cc=[])
     entry = delivery.ledger_entry(f"alert:{daily_run.run_date.isoformat()}:run{daily_run.pk}", daily_run.run_date, Delivery.KIND_ALERT,
                                   daily_run=daily_run)
     try:
         return delivery.deliver(entry, email, profile, Delivery.KIND_ALERT, max_attempts=1, daily_run=daily_run)
     except Exception:
-        logger.exception("Failed to send admin alert")
+        logger.exception("Failed to send admin summary")
         return None
 
 
@@ -391,7 +430,7 @@ def send_test_email(test_recipient, group_id=None, profile=None, triggered_by=""
 
 
 def _sample_group():
-    unit = SimpleNamespace(name="Sample Unit", code="UNIT1")
+    unit = SimpleNamespace(name="Plant 1", code="P1")
     dept = SimpleNamespace(name="Quality Assurance", code="QA")
     return SimpleNamespace(unit=unit, department=dept, to_emails=["qa-team@example.com"], cc_emails=["qa-head@example.com"])
 
@@ -405,22 +444,21 @@ def sample_email(template, recipients=None):
     today = business_today()
     group = _sample_group()
     unit, dept = group.unit, group.department
-    cats = {
-        "qms": SimpleNamespace(pk=-1, name="Change Control", kind=Category.KIND_QMS, sort_order=1, display_fields=["title"], title_field="title"),
-        "audit": SimpleNamespace(pk=-2, name="Audit Observation", kind=Category.KIND_AUDIT, sort_order=2, display_fields=["title"], title_field="title"),
-        "action": SimpleNamespace(pk=-3, name="Audit Action Item", kind=Category.KIND_ACTION, sort_order=3, display_fields=["title"], title_field="title"),
-    }
-    parent = SimpleNamespace(source_id="AUD-2026-004", title="Supplier audit - API vendor", category=SimpleNamespace(name="Audit"))
+    cc_cat = SimpleNamespace(pk=-1, name="Change Control", kind=Category.KIND_QMS)
+    capa_cat = SimpleNamespace(pk=-2, name="CAPA", kind=Category.KIND_QMS)
+    act_cat = SimpleNamespace(pk=-3, name="Action Plan", kind=Category.KIND_ACTION)
+    cc = SimpleNamespace(source_id="CC-2026-0142", title="Introduction of new product XYZ 10 mg tablets", category=cc_cat)
 
-    def ev(cat, sid, title, days, with_parent=False):
-        rec = SimpleNamespace(pk=0, source_id=sid, title=title, status="Open", category=cats[cat], category_id=cats[cat].pk,
-                              unit=unit, department=dept, data={"title": title}, parent=parent if with_parent else None,
-                              parent_id=1 if with_parent else None)
-        return Evaluation(rec, True, "due_today" if days == 0 else "within_window", None, today + timedelta(days=days))
+    def ev(cat, sid, title, days, section, parent=None):
+        rec = SimpleNamespace(pk=0, source_id=sid, title=title, status="Open", category=cat, category_id=cat.pk, unit=unit,
+                              department=dept, data={"title": title}, parent=parent, parent_id=1 if parent else None,
+                              parent_ref=parent.source_id if parent else "")
+        reason = "due_today" if days == 0 else ("near_due" if section == SECTION_ACTION else "periodic")
+        return Evaluation(rec, True, reason, None, today + timedelta(days=days), section=section)
 
-    items = [ev("qms", "CC-2026-0142", "Change of HPLC column supplier", 0),
-             ev("audit", "OBS-2026-017", "Inadequate line clearance records", 3, True),
-             ev("action", "ACT-2026-051", "Retrain packing staff on line clearance", 5, True)]
+    items = [ev(act_cat, "CC-2026-0142-A03", "Prepare specification and STP for XYZ 10 mg tablets", 0, SECTION_ACTION, cc),
+             ev(act_cat, "CC-2026-0142-A05", "Create material codes for new packing materials", 4, SECTION_ACTION, cc),
+             ev(capa_cat, "CAPA-2026-031", "Revise cleaning validation protocol for granulation area", 45, SECTION_PERIODIC)]
     return compose.compose_reminder(group, items, template, today, 7, recipients=recipients or (group.to_emails, group.cc_emails))
 
 

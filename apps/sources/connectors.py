@@ -6,13 +6,13 @@ restricted to the roots configured in SOURCE_ROOTS (no arbitrary paths).
 
 import logging
 import os
-import time
 from pathlib import Path
 from urllib.parse import quote
 
 import requests
 from django.conf import settings
 
+from apps.core import m365
 from apps.sources.models import DataSource
 
 logger = logging.getLogger("qa.sources")
@@ -113,38 +113,15 @@ def _read_server_file(config):
 
 # --- Microsoft Graph ---------------------------------------------------------------
 
-_graph_token = {"value": None, "expires": 0}
-
-
 def graph_configured():
-    return all(os.environ.get(k) for k in ("GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "GRAPH_CLIENT_SECRET"))
+    return m365.configured()
 
 
 def graph_token():
-    if _graph_token["value"] and _graph_token["expires"] > time.time() + 60:
-        return _graph_token["value"]
-    if not graph_configured():
-        raise SourceError("Microsoft Graph credentials (GRAPH_TENANT_ID, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET) are not set on the server.")
-    tenant = os.environ["GRAPH_TENANT_ID"]
     try:
-        resp = requests.post(
-            f"https://login.microsoftonline.com/{quote(tenant)}/oauth2/v2.0/token",
-            data={
-                "client_id": os.environ["GRAPH_CLIENT_ID"],
-                "client_secret": os.environ["GRAPH_CLIENT_SECRET"],
-                "scope": "https://graph.microsoft.com/.default",
-                "grant_type": "client_credentials",
-            },
-            timeout=HTTP_TIMEOUT,
-        )
-    except requests.RequestException:
-        raise SourceError("Could not reach Microsoft sign-in. Check the server's outbound network access.")
-    if resp.status_code != 200:
-        logger.warning("Graph token request failed", extra={"status": resp.status_code})
-        raise SourceError("Microsoft sign-in rejected the app credentials. Check the app registration, secret and admin consent.")
-    body = resp.json()
-    _graph_token.update(value=body["access_token"], expires=time.time() + int(body.get("expires_in", 3600)))
-    return _graph_token["value"]
+        return m365.access_token()
+    except m365.M365Error as exc:
+        raise SourceError(str(exc))
 
 
 def _graph_get(path, params=None, stream=False):
@@ -170,6 +147,20 @@ def _drive_base(config):
     if config.get("user"):
         return f"/users/{quote(config['user'])}/drive"
     raise SourceError("Specify a drive ID, SharePoint site ID or OneDrive user.")
+
+
+def resolve_share_link(url):
+    """Turn a OneDrive/SharePoint link (copied from 'Share' or the address bar) into drive + item IDs."""
+    url = (url or "").strip()
+    if not url.lower().startswith("https://") or not any(h in url.lower() for h in ("sharepoint.com", "onedrive.live.com", "1drv.ms")):
+        raise SourceError("Paste a OneDrive or SharePoint link (https://...sharepoint.com/...).")
+    item = _graph_get(f"/shares/{m365.share_id(url)}/driveItem", params={"$select": "id,name,file,parentReference,webUrl"}).json()
+    if "file" not in item:
+        raise SourceError("The link points to a folder. Share the Excel file itself.")
+    if Path(item.get("name", "")).suffix.lower() not in ALLOWED_EXTENSIONS:
+        raise SourceError("The linked file is not an .xlsx or .xlsm workbook.")
+    return {"drive_id": item["parentReference"]["driveId"], "item_id": item["id"], "display_path": item.get("name", ""),
+            "web_url": item.get("webUrl", "")[:500]}
 
 
 def graph_search_sites(term):

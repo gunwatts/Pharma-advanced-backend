@@ -8,7 +8,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
-from apps.accounts.permissions import HasPermission, has_perm
+from apps.accounts.permissions import HasPermission, has_full_scope, has_perm, scope_queryset
 from apps.catalog.models import RecipientGroup
 from apps.core import audit
 from apps.core.timeutils import business_today
@@ -155,6 +155,8 @@ class DailyRunViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets
     permission_classes = [HasPermission.of("runs.view")]
 
     def get_queryset(self):
+        if not has_full_scope(self.request.user):
+            raise PermissionDenied("Run history covers all plants; it is available to administrators only.")
         qs = DailyRun.objects.all()
         if self.request.query_params.get("kind"):
             qs = qs.filter(kind=self.request.query_params["kind"])
@@ -188,6 +190,8 @@ class DeliveryViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets
 
     def get_queryset(self):
         qs = Delivery.objects.select_related("reconciled_by")
+        if not has_full_scope(self.request.user):  # plant QA heads: only their plants' department mails
+            qs = scope_queryset(qs.filter(kind__in=[Delivery.KIND_REMINDER, Delivery.KIND_NO_PENDING]), self.request.user)
         params = self.request.query_params
         for param in ("state", "kind", "run_date", "daily_run", "unit", "department"):
             if params.get(param):

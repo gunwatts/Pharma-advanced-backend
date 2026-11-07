@@ -13,16 +13,17 @@ PLACEHOLDER_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 BRACES_RE = re.compile(r"\{\{|\}\}")
 
 PLACEHOLDERS = {
-    "unit_name": "Unit name",
-    "unit_code": "Unit code",
+    "unit_name": "Plant name",
+    "unit_code": "Plant code",
     "department_name": "Department name",
     "department_code": "Department code",
     "run_date": "Reminder date (DD-Mon-YYYY)",
     "window_days": "Reminder window in days",
     "total_count": "Total items in the email",
-    "qms_count": "Number of QMS records",
-    "audit_count": "Number of audit records",
-    "action_count": "Number of action items",
+    "action_required_count": "Items in the 'Action required' section",
+    "periodic_count": "Items in the 'Periodic reminders' section",
+    "qms_count": "Number of QMS events",
+    "action_count": "Number of action plans",
     "due_today_count": "Number of items due today",
     "app_url": "Link to the application",
 }

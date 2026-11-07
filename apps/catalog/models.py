@@ -98,6 +98,11 @@ class Category(models.Model):
     display_fields = models.JSONField(default=list, blank=True, help_text="Field keys shown in emails and tables.")
     sort_order = models.PositiveIntegerField(default=100)
     active = models.BooleanField(default=True)
+    sheet_name = models.CharField(max_length=128, blank=True, help_text="Worksheet name in every plant workbook.")
+    source_columns = models.JSONField(
+        default=dict, blank=True,
+        help_text="Column headers: {id, department, description, target_date, status, qms_number (action plans only)}.",
+    )
 
     class Meta:
         ordering = ["sort_order", "name"]
@@ -164,13 +169,17 @@ class StatusDefinition(models.Model):
 class Relationship(models.Model):
     """Explicit parent-child link: child.<link_field> holds the parent's source ID."""
 
-    parent_category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="child_relationships")
+    parent_category = models.ForeignKey(
+        Category, null=True, blank=True, on_delete=models.PROTECT, related_name="child_relationships",
+        help_text="Empty = the parent can be any event category of the same plant.",
+    )
     child_category = models.OneToOneField(Category, on_delete=models.PROTECT, related_name="parent_relationship")
     link_field = models.CharField(max_length=63, validators=[validate_key])
     active = models.BooleanField(default=True)
 
     def __str__(self):
-        return f"{self.parent_category.key} -> {self.child_category.key} via {self.link_field}"
+        parent = self.parent_category.key if self.parent_category_id else "any event"
+        return f"{parent} -> {self.child_category.key} via {self.link_field}"
 
     def clean(self):
         if self.parent_category_id and self.parent_category_id == self.child_category_id:

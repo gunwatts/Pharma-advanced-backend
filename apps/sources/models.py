@@ -16,6 +16,10 @@ class DataSource(models.Model):
     config = models.JSONField(default=dict, blank=True)
     description = models.CharField(max_length=255, blank=True)
     active = models.BooleanField(default=True)
+    plant = models.OneToOneField(
+        "catalog.Unit", null=True, blank=True, on_delete=models.SET_NULL, related_name="workbook",
+        help_text="Plant whose QMS workbook this is (simple setup).",
+    )
     uploaded_file_name = models.CharField(max_length=255, blank=True)
     uploaded_at = models.DateTimeField(null=True, blank=True)
     last_checked_at = models.DateTimeField(null=True, blank=True)

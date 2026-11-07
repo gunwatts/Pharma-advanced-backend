@@ -81,7 +81,7 @@ class WorkflowTests(QATestCase):
         for html in (qa_html, qc_html):  # parent context in each relevant department email
             self.assertIn("OBS-1", html)
             self.assertIn("Line clearance gap", html)
-        self.assertIn("Action items", qa_html)
+        self.assertIn("Action required", qa_html)
 
     def test_email_sections_distinguish_qms_audit_and_actions(self):
         self.mapping(self.obs, "OBS", {"audit_ref": "Audit No"})
@@ -89,8 +89,9 @@ class WorkflowTests(QATestCase):
         self.set_rows([self.row("CC-1")], {"OBS": [HEADERS + ["Audit No"], self.row("OBS-1", offset=1) + ["AUD-X"]]})
         plan = workflow.build_plan(sync=True)
         html = next(g for g in plan.groups if g.group.unit == self.u1 and g.group.department == self.qa).email.html
-        self.assertIn("QMS records (1)", html)
-        self.assertIn("Audits and observations (1)", html)
+        self.assertIn("Action required - due soon (2)", html)
+        self.assertIn("Audit Observation", html)
+        self.assertIn("Change Control", html)
 
     def test_dynamic_data_is_html_escaped(self):
         self.set_rows([self.row("CC-1", title="<img src=x onerror=alert(1)>")])

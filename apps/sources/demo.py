@@ -1,56 +1,42 @@
-"""Synthetic demo workbook (no real data) used by `seed_demo` and tests."""
+"""Synthetic demo plant workbooks (no real data) used by `seed_demo` and tests."""
 
 import io
 from datetime import timedelta
 
 from openpyxl import Workbook
 
-HEADERS = ["Record No", "Plant", "Department", "Description", "Status", "Target Date", "Initiated On", "Owner"]
+EVENT = ["QMS Number", "Department", "Description", "Target Date", "Status"]
+ACTION = ["Action ID", "QMS Number", "Department", "Description", "Target Date", "Status"]
 
 
-def _rows(prefix, today, extra=None):
-    plan = [
-        (0, "UNIT1", "QA", "Open"), (2, "UNIT1", "QC", "In Progress"), (5, "UNIT1", "Production", "Open"),
-        (-3, "UNIT1", "QA", "Open"), (12, "UNIT1", "QA", "Pending Approval"), (1, "UNIT2", "QA", "Open"),
-        (7, "UNIT2", "Engineering", "In Progress"), (3, "UNIT1", "QA", "Closed"),
-    ]
-    rows = []
-    for i, (offset, unit, dept, status) in enumerate(plan, start=1):
-        row = [f"{prefix}-{today.year}-{i:03d}", unit, dept, f"{prefix} sample record {i}", status,
-               (today + timedelta(days=offset)).strftime("%d-%m-%Y"), (today - timedelta(days=30)).strftime("%d-%m-%Y"), f"Owner {i}"]
-        rows.append(row + (extra(i) if extra else []))
-    return rows
-
-
-def build_demo_workbook(today) -> bytes:
-    wb = Workbook()
+def build_plant_workbook(plant_code, today) -> bytes:
+    """One plant workbook in the standard layout: event sheets + one Action Plans sheet."""
+    d = lambda n: (today + timedelta(days=n)).strftime("%d-%m-%Y")  # noqa: E731
+    p = plant_code
     sheets = {
-        "Change Control": ("CC", None, []),
-        "Deviation": ("DEV", None, []),
-        "CAPA": ("CAPA", None, []),
-        "Audit": ("AUD", lambda i: ["Internal"], ["Audit Type"]),
-        "Observations": ("OBS", lambda i: [f"AUD-{today.year}-{min(i, 3):03d}"], ["Audit No"]),
-        "Action Items": ("ACT", lambda i: [f"OBS-{today.year}-{(i % 3) + 1:03d}"], ["Observation No"]),
+        "Change Control": [EVENT, [f"{p}/CC/26/001", "Production", "Introduction of new product XYZ 10 mg tablets", d(60), "Open"],
+                           [f"{p}/CC/26/002", "Engineering", "Replacement of FBD filter bags", d(20), "Open"],
+                           [f"{p}/CC/26/003", "QA", "Revision of SOP for line clearance", d(-5), "Open"]],
+        "Deviation": [EVENT, [f"{p}/DEV/26/014", "Production", "Temperature excursion in granulation area", d(5), "Open"]],
+        "Incident": [EVENT],
+        "CAPA": [EVENT, [f"{p}/CAPA/26/031", "QA", "Revise cleaning validation protocol", d(45), "Open"],
+                 [f"{p}/CAPA/26/032", "QC", "HPLC column usage log", d(10), "Closed"]],
+        "OOS": [EVENT, [f"{p}/OOS/26/004", "QC", "Assay OOS for batch B2611", d(3), "Open"]],
+        "OOT": [EVENT],
+        "Action Plans": [ACTION,
+                         [f"{p}/CC/26/001-A1", f"{p}/CC/26/001", "QC", "Prepare specification and STP", d(0), "Open"],
+                         [f"{p}/CC/26/001-A2", f"{p}/CC/26/001", "Stores", "Create material codes for packing materials", d(4), "Open"],
+                         [f"{p}/CC/26/001-A3", f"{p}/CC/26/001", "QA", "Approve artwork", d(30), "Open"],
+                         [f"{p}/CC/26/001-A4", f"{p}/CC/26/001", "Production", "Prepare BMR/BPR", d(15), "Open"],
+                         [f"{p}/DEV/26/014-A1", f"{p}/DEV/26/014", "Engineering", "Calibrate area temperature sensors", d(2), "Open"],
+                         [f"{p}/CAPA/26/031-A1", f"{p}/CAPA/26/031", "QA", "Train staff on revised protocol", d(-2), "Open"]],
     }
-    first = True
-    for title, (prefix, extra, extra_headers) in sheets.items():
-        ws = wb.active if first else wb.create_sheet()
-        first = False
-        ws.title = title
-        ws.append(HEADERS + extra_headers)
-        for row in _rows(prefix, today, extra):
+    wb = Workbook()
+    wb.remove(wb.active)
+    for name, rows in sheets.items():
+        ws = wb.create_sheet(name)
+        for row in rows:
             ws.append(row)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
-
-
-BASE_MAP = {"title": "Description", "target_date": "Target Date", "initiated_on": "Initiated On", "owner": "Owner"}
-DEMO_MAPPINGS = [
-    ("change_control", "Change Control", {}),
-    ("deviation", "Deviation", {}),
-    ("capa", "CAPA", {}),
-    ("audit", "Audit", {"audit_type": "Audit Type"}),
-    ("audit_observation", "Observations", {"audit_ref": "Audit No"}),
-    ("audit_action_item", "Action Items", {"observation_ref": "Observation No"}),
-]

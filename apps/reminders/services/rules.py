@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from apps.catalog.models import normalize_label
-from apps.reminders.services.eligibility import date_eligibility, parse_iso
+from apps.reminders.services.eligibility import SECTION_ACTION, parse_iso, reminder_decision
 
 OPERATORS = {
     "equals": "equals",
@@ -68,6 +68,7 @@ class Evaluation:
     rule: object = None
     target_date: object = None
     detail: str = ""
+    section: str = None
 
 
 class RuleSet:
@@ -85,7 +86,7 @@ class RuleSet:
         return set(self.by_category)
 
 
-def evaluate_rule(record, rule, today):
+def evaluate_rule(record, rule, today, catch_up_days=1, tz=None):
     if rule._unit_ids and record.unit_id not in rule._unit_ids:
         return Evaluation(record, False, "out_of_rule_scope", rule)
     if rule._dept_ids and record.department_id not in rule._dept_ids:
@@ -107,16 +108,20 @@ def evaluate_rule(record, rule, today):
     target = parse_iso((record.data or {}).get(rule.target_date_field))
     if blocking:
         return Evaluation(record, False, "data_issue", rule, target, detail="; ".join(i.get("message", "") for i in blocking)[:300])
-    eligible, reason = date_eligibility(target, today, rule.window_days)
-    return Evaluation(record, eligible, reason, rule, target)
+    first_seen = record.first_seen_at.astimezone(tz).date() if (record.first_seen_at and tz) else (
+        record.first_seen_at.date() if record.first_seen_at else None)
+    section, reason = reminder_decision(target, today, rule.window_days, getattr(rule, "repeat_every_days", None),
+                                        getattr(rule, "repeat_anchor", "due_date"), getattr(rule, "start_days_before", None),
+                                        first_seen, catch_up_days)
+    return Evaluation(record, section is not None, reason, rule, target, section=section)
 
 
-def evaluate_record(record, ruleset: RuleSet, today):
+def evaluate_record(record, ruleset: RuleSet, today, catch_up_days=1, tz=None):
     rules = ruleset.by_category.get(record.category_id, [])
     if not rules:
         return Evaluation(record, False, "no_active_rule")
-    evaluations = [evaluate_rule(record, rule, today) for rule in rules]
-    for ev in evaluations:
-        if ev.eligible:
-            return ev
+    evaluations = [evaluate_rule(record, rule, today, catch_up_days, tz) for rule in rules]
+    eligible = [ev for ev in evaluations if ev.eligible]
+    if eligible:  # "action required" wins over a periodic reminder from another rule
+        return next((ev for ev in eligible if ev.section == SECTION_ACTION), eligible[0])
     return evaluations[0]

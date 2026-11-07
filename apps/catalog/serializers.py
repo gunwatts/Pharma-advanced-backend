@@ -139,7 +139,7 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class RelationshipSerializer(serializers.ModelSerializer):
-    parent_name = serializers.CharField(source="parent_category.name", read_only=True)
+    parent_name = serializers.CharField(source="parent_category.name", read_only=True, default="Any event type")
     child_name = serializers.CharField(source="child_category.name", read_only=True)
 
     class Meta:

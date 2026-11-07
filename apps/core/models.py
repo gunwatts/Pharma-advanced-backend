@@ -18,6 +18,8 @@ class SystemSettings(models.Model):
     activated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     config_version = models.PositiveIntegerField(default=1)
     wizard_state = models.JSONField(default=dict, blank=True, help_text="Quick Start progress (save/resume).")
+    workbook_layout = models.JSONField(
+        default=dict, blank=True, help_text="Shared plant workbook settings: {header_row, date_formats, max_rejected_rows}.")
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -64,3 +66,30 @@ class JobLock(models.Model):
     holder = models.CharField(max_length=128)
     acquired_at = models.DateTimeField()
     expires_at = models.DateTimeField()
+
+
+class M365Connection(models.Model):
+    """Singleton: how the app talks to Microsoft 365 (OneDrive files + sending mail).
+
+    ``app``: app-only credentials from environment variables (IT-registered app).
+    ``delegated``: an admin signed in with Microsoft; only an encrypted refresh token is stored.
+    """
+
+    MODE_APP = "app"
+    MODE_DELEGATED = "delegated"
+    MODE_CHOICES = [(MODE_APP, "IT-registered app (app-only)"), (MODE_DELEGATED, "Admin signs in with Microsoft")]
+
+    mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_APP)
+    account = models.CharField(max_length=255, blank=True)
+    refresh_token_encrypted = models.TextField(blank=True)
+    connected_at = models.DateTimeField(null=True, blank=True)
+    connected_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    last_error = models.CharField(max_length=500, blank=True)
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls):
+        return cls.objects.get_or_create(pk=1)[0]

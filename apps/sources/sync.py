@@ -336,15 +336,15 @@ def sync_mapping(mapping: SourceMapping, daily_run=None, triggered_by="", conten
     if result.structure_errors:
         return _finish(run, mapping, SyncRun.STATUS_FAILED, "Worksheet structure is invalid: " + "; ".join(result.structure_errors), result)
 
-    # IDs already owned by another source mapping of the same category are conflicts.
+    # IDs (per plant) already owned by another source mapping of the same category are conflicts.
     ids = [r.source_id for r in result.rows]
     foreign = set(
-        Record.objects.filter(category=mapping.category, source_id__in=ids).exclude(mapping=mapping).values_list("source_id", flat=True)
+        Record.objects.filter(category=mapping.category, source_id__in=ids).exclude(mapping=mapping).values_list("unit_id", "source_id")
     ) if ids else set()
     if foreign:
         keep = []
         for row in result.rows:
-            if row.source_id in foreign:
+            if (row.unit.pk, row.source_id) in foreign:
                 result.rejected.append({"row": row.row_number, "source_id": row.source_id,
                                         "message": "This record ID is already provided by another source for the same category."})
             else:
@@ -407,13 +407,24 @@ def _apply(mapping: SourceMapping, result: ParseResult, run: SyncRun):
 
 
 def relink_parents():
-    """Resolve parent links via explicit relationships (never by fuzzy text matching)."""
+    """Resolve parent links via explicit relationships (never by fuzzy text matching).
+
+    The parent is looked up by its record ID within the same plant. A relationship without a
+    parent category links to any active event (non action-item) category, e.g. one Action Plans
+    sheet covering change controls, deviations, CAPAs, etc.
+    """
     for rel in Relationship.objects.filter(active=True):
-        parents = dict(Record.objects.filter(category=rel.parent_category).values_list("source_id", "id"))
-        children = list(Record.objects.filter(category=rel.child_category).only("id", "parent_ref", "parent_id", "issues"))
+        if rel.parent_category_id:
+            parent_qs = Record.objects.filter(category_id=rel.parent_category_id)
+        else:
+            parent_qs = Record.objects.filter(category__active=True).exclude(category__kind=Category.KIND_ACTION)
+        parents = {}
+        for unit_id, source_id, pk in parent_qs.values_list("unit_id", "source_id", "id"):
+            parents.setdefault((unit_id, source_id), pk)  # first match wins if two event types share a number
+        children = list(Record.objects.filter(category=rel.child_category).only("id", "unit_id", "parent_ref", "parent_id", "issues"))
         changed = []
         for child in children:
-            parent_id = parents.get(child.parent_ref) if child.parent_ref else None
+            parent_id = parents.get((child.unit_id, child.parent_ref)) if child.parent_ref else None
             issues = [i for i in child.issues if i.get("code") != "parent_not_found"]
             if child.parent_ref and parent_id is None:
                 issues.append({"field": rel.link_field, "code": "parent_not_found",

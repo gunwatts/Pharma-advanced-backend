@@ -5,3 +5,5 @@ openpyxl==3.1.5
 python-dotenv==1.2.4
 requests==2.34.2
 whitenoise==6.12.0
+cryptography==46.0.7
+waitress==3.0.2

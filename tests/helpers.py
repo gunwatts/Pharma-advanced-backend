@@ -60,6 +60,9 @@ class QATestCase(TestCase):
         self.act = Category.objects.get(key="audit_action_item")
         self.audit = Category.objects.get(key="audit")
         self.source = DataSource.objects.create(name="Test workbook", provider="upload")
+        # Tests define their own rules; the old audit example categories are re-enabled for coverage.
+        ReminderRule.objects.all().delete()
+        Category.objects.filter(key__in=["audit", "audit_observation", "audit_action_item"]).update(active=True)
         SystemSettings.objects.filter(pk=1).update(reminders_active=True)
 
     def tearDown(self):

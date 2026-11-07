@@ -252,7 +252,7 @@ class SecretHandlingTests(ApiTestCase):
                                             "secret_env_prefix": "SENDER_NOPE"}, format="json").data["id"]
         resp = client.post(f"/api/senders/{sid}/test-connection/")
         self.assertEqual(resp.data["status"], "credentials_missing")
-        self.assertIn("SENDER_NOPE_GRAPH_CLIENT_SECRET", resp.data["message"])
+        self.assertIn("GRAPH_CLIENT_SECRET", resp.data["message"])
 
     @override_settings(SOURCE_ROOTS={"share": "/tmp"})
     def test_server_folder_path_traversal_rejected(self):
@@ -297,7 +297,7 @@ class SetupFlowTests(ApiTestCase):
         preview = client.post("/api/templates/preview/", {"subject": "Hi {{ unit_name }}", "intro_text": "x", "outro_text": "",
                                                            "no_pending_subject": "None", "no_pending_text": ""}, format="json")
         self.assertEqual(preview.status_code, 200, preview.data)
-        self.assertEqual(preview.data["subject"], "Hi Sample Unit")
+        self.assertEqual(preview.data["subject"], "Hi Plant 1")
         existing = client.post("/api/templates/preview/", {"name": "Default daily reminder", "subject": "S", "no_pending_subject": "N"}, format="json")
         self.assertEqual(existing.status_code, 200, existing.data)  # previewing an existing template must not fail uniqueness
         bad = client.post("/api/templates/preview/", {"subject": "{{ nope }}", "no_pending_subject": "x"}, format="json")

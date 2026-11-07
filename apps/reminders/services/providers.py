@@ -10,7 +10,6 @@ import logging
 import os
 import smtplib
 import ssl
-import time
 import uuid
 from dataclasses import dataclass
 from email.message import EmailMessage
@@ -18,6 +17,8 @@ from email.utils import formataddr, make_msgid
 from urllib.parse import quote
 
 import requests
+
+from apps.core import m365
 
 logger = logging.getLogger("qa.email")
 HTTP_TIMEOUT = 30
@@ -181,33 +182,23 @@ class SmtpProvider(BaseProvider):
 
 
 class GraphProvider(BaseProvider):
-    """Microsoft 365 via Graph sendMail using app-only (client credentials) auth.
+    """Microsoft 365 via Graph ``/users/{mailbox}/sendMail`` using the shared Microsoft 365 connection.
 
-    Requires the Mail.Send *application* permission with admin consent. Restrict
-    the app to the sender mailbox with an Exchange application access policy.
+    App-only mode needs the Mail.Send application permission (restrict it to the reminder mailbox with an
+    Exchange application access policy). Signed-in mode needs Mail.Send.Shared and "Send As" on the shared mailbox.
     """
 
-    required_secrets = ("GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "GRAPH_CLIENT_SECRET")
-    _token_cache = {}
+    def missing_secrets(self):
+        return m365.missing_env()
+
+    def secret_status(self):
+        return {name: name not in m365.missing_env() for name in m365.ENV_NAMES}
 
     def _token(self):
-        cache_key = self.profile.secret_env_prefix
-        cached = self._token_cache.get(cache_key)
-        if cached and cached[1] > time.time() + 60:
-            return cached[0]
         try:
-            resp = requests.post(
-                f"https://login.microsoftonline.com/{quote(_env(self.profile, 'GRAPH_TENANT_ID'))}/oauth2/v2.0/token",
-                data={"client_id": _env(self.profile, "GRAPH_CLIENT_ID"), "client_secret": _env(self.profile, "GRAPH_CLIENT_SECRET"),
-                      "scope": "https://graph.microsoft.com/.default", "grant_type": "client_credentials"},
-                timeout=HTTP_TIMEOUT)
-        except requests.RequestException:
-            raise ProviderError("Could not reach Microsoft sign-in (check outbound network access).")
-        if resp.status_code != 200:
-            raise ProviderError("Microsoft sign-in rejected the app credentials (check tenant ID, client ID, secret and admin consent).")
-        body = resp.json()
-        self._token_cache[cache_key] = (body["access_token"], time.time() + int(body.get("expires_in", 3600)))
-        return body["access_token"]
+            return m365.access_token()
+        except m365.M365Error as exc:
+            raise ProviderError(str(exc))
 
     def _test(self):
         token = self._token()
@@ -217,11 +208,10 @@ class GraphProvider(BaseProvider):
         except requests.RequestException:
             raise ProviderError("Could not reach Microsoft Graph.")
         if resp.status_code == 200:
-            return ConnectionResult(True, "connected", "Token acquired and sender mailbox found. Sending also requires the Mail.Send application permission.")
+            return ConnectionResult(True, "connected", "Connected to Microsoft 365 and the mailbox was found. Send a test email to confirm send permission.")
         if resp.status_code in (401, 403):
-            # User.Read.All is not required to send; the token itself is valid.
-            return ConnectionResult(True, "connected", "Token acquired. Mailbox lookup was not permitted (User.Read.All not granted) - "
-                                                       "send a test email to confirm Mail.Send.")
+            # Reading the mailbox profile is not required to send; the connection itself works.
+            return ConnectionResult(True, "connected", "Connected to Microsoft 365. Send a test email to confirm send permission for this mailbox.")
         if resp.status_code == 404:
             raise ProviderError("The sender mailbox was not found in the tenant.")
         raise ProviderError(f"Microsoft Graph returned HTTP {resp.status_code}.")

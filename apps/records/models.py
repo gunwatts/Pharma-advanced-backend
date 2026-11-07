@@ -24,7 +24,7 @@ class Record(models.Model):
 
     class Meta:
         ordering = ["category__sort_order", "source_id"]
-        constraints = [models.UniqueConstraint(fields=["category", "source_id"], name="uniq_record_source_id")]
+        constraints = [models.UniqueConstraint(fields=["category", "unit", "source_id"], name="uniq_record_plant_source_id")]
         indexes = [
             models.Index(fields=["unit", "department"]),
             models.Index(fields=["category", "unit", "department"]),
